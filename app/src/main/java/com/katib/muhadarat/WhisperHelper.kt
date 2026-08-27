@@ -26,10 +26,11 @@ class WhisperHelper(private val context: Context) {
             get() = String(Base64.decode("QVEuQWI4Uk42TDlXMnBEVzBzZUF2RExXWTk0Q1hyNjZEY2hqU1Q3cjQzOHVkSEVBQS1mUVE=", Base64.NO_WRAP))
 
         private val CANDIDATE_MODELS = listOf(
-            "gemini-2.5-flash-lite",
-            "gemini-flash-lite-latest",
-            "gemini-2.5-flash",
-            "gemini-2.0-flash"
+            "gemini-3.5-flash-lite",
+            "gemini-3.5-flash",
+            "gemini-3.5-transcribe",
+            "gemini-3.6-flash",
+            "gemini-flash-lite-latest"
         )
 
         private const val PROMPT = """أنت نظام تفريغ صوتي فائق السرعة والدقة.

@@ -232,6 +232,7 @@ fun TranscribeScreen(helper: WhisperHelper) {
                     // موجة صوتية بسيطة
                     WaveCanvas(isRecording)
 
+                    // الزران يظهران دائماً معاً في كل الأوقات
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -259,12 +260,19 @@ fun TranscribeScreen(helper: WhisperHelper) {
                             },
                             enabled = !isRecording && !isTranscribing,
                             shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isRecording) Color(0xFF065F46) else Color(0xFF10B981),
+                                disabledContainerColor = if (isRecording) Color(0xFF065F46) else Color.White.copy(alpha = 0.08f)
+                            ),
                             modifier = Modifier
                                 .weight(1f)
-                                .height(46.dp)
+                                .height(48.dp)
                         ) {
-                            Text("بدء التسجيل", fontWeight = FontWeight.Bold)
+                            Text(
+                                text = if (isRecording) "جارٍ التسجيل…" else "بدء التسجيل",
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
                         }
 
                         Button(
@@ -292,14 +300,22 @@ fun TranscribeScreen(helper: WhisperHelper) {
                                     }
                                 }
                             },
-                            enabled = isRecording,
+                            enabled = isRecording && !isTranscribing,
                             shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444)),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFFEF4444),
+                                disabledContainerColor = Color.White.copy(alpha = 0.08f),
+                                disabledContentColor = Color(0xFF6B7280)
+                            ),
                             modifier = Modifier
                                 .weight(1f)
-                                .height(46.dp)
+                                .height(48.dp)
                         ) {
-                            Text("إنهاء وتفريغ", fontWeight = FontWeight.Bold)
+                            Text(
+                                text = "إنهاء وتفريغ",
+                                fontWeight = FontWeight.Bold,
+                                color = if (isRecording) Color.White else Color(0xFF9AA0C3)
+                            )
                         }
                     }
 
@@ -324,11 +340,10 @@ fun TranscribeScreen(helper: WhisperHelper) {
             }
         }
 
-        // ── بطاقة النتيجة مع أزرار (نسخ / مشاركة / حذف) ──
+        // ── بطاقة النتيجة مع زر (حفظ) فقط ──
         ResultCard(
             text = resultText,
-            onUpdate = { resultText = it },
-            onClear = { resultText = "" }
+            onUpdate = { resultText = it }
         )
     }
 }
@@ -336,8 +351,7 @@ fun TranscribeScreen(helper: WhisperHelper) {
 @Composable
 private fun ResultCard(
     text: String,
-    onUpdate: (String) -> Unit,
-    onClear: () -> Unit
+    onUpdate: (String) -> Unit
 ) {
     val ctx = LocalContext.current
 
@@ -359,51 +373,35 @@ private fun ResultCard(
                     text = "النص المستخرج",
                     color = Color.White,
                     fontWeight = FontWeight.Bold,
-                    fontSize = 14.sp
+                    fontSize = 15.sp
                 )
 
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    // زر نسخ
-                    OutlinedButton(
-                        onClick = {
-                            val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                            cm.setPrimaryClip(ClipData.newPlainText("katib", text))
-                            Toast.makeText(ctx, "تم نسخ النص", Toast.LENGTH_SHORT).show()
-                        },
-                        enabled = text.isNotEmpty(),
-                        shape = RoundedCornerShape(8.dp),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
-                    ) {
-                        Text("نسخ", fontSize = 12.sp)
-                    }
-
-                    // زر مشاركة
-                    OutlinedButton(
-                        onClick = {
+                // زر حفظ فقط
+                Button(
+                    onClick = {
+                        val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        cm.setPrimaryClip(ClipData.newPlainText("katib", text))
+                        Toast.makeText(ctx, "تم نسخ النص للحافظة", Toast.LENGTH_SHORT).show()
+                        try {
                             val sendIntent = Intent().apply {
                                 action = Intent.ACTION_SEND
                                 putExtra(Intent.EXTRA_TEXT, text)
                                 type = "text/plain"
                             }
-                            ctx.startActivity(Intent.createChooser(sendIntent, "مشاركة النص"))
-                        },
-                        enabled = text.isNotEmpty(),
-                        shape = RoundedCornerShape(8.dp),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
-                    ) {
-                        Text("مشاركة", fontSize = 12.sp)
-                    }
-
-                    // زر حذف / مسح
-                    OutlinedButton(
-                        onClick = onClear,
-                        enabled = text.isNotEmpty(),
-                        shape = RoundedCornerShape(8.dp),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFF87171)),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
-                    ) {
-                        Text("حذف", fontSize = 12.sp)
-                    }
+                            ctx.startActivity(Intent.createChooser(sendIntent, "حفظ ومشاركة النص"))
+                        } catch (_: Exception) {}
+                    },
+                    enabled = text.isNotEmpty(),
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6C7CFF)),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp)
+                ) {
+                    Text(
+                        text = "حفظ",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
                 }
             }
 
