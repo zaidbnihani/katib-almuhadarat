@@ -32,7 +32,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.katib.muhadarat.R
 import com.katib.muhadarat.WhisperHelper
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import kotlin.math.sin
 
@@ -55,17 +57,14 @@ fun TranscribeScreen(helper: WhisperHelper) {
     var recFile by remember { mutableStateOf<File?>(null) }
     var recorder: MediaRecorder? by remember { mutableStateOf(null) }
 
-    // حوار الإعدادات لمفتاح API
-    var showSettingsDialog by remember { mutableStateOf(false) }
-
     val pickFileLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         if (uri == null) return@rememberLauncherForActivityResult
         pickedName = uri.lastPathSegment ?: "ملف محدد"
         scope.launch {
             isTranscribing = true
-            progressText = "جاري رفع ومعالجة الملف بالذكاء الاصطناعي…"
+            progressText = "جاري استخراج الصوت وتفريغه بالذكاء الاصطناعي…"
             try {
-                val tmpFile = copyUriToTemp(ctx, uri)
+                val tmpFile = withContext(Dispatchers.IO) { copyUriToTemp(ctx, uri) }
                 val mimeType = ctx.contentResolver.getType(uri) ?: ""
                 val transcribed = helper.transcribeFile(tmpFile, mimeType)
                 resultText = transcribed
@@ -93,39 +92,27 @@ fun TranscribeScreen(helper: WhisperHelper) {
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // ── Header (أيقونة التطبيق + العنوان + زر الإعدادات) ──
+        // ── Header (أيقونة التطبيق + العنوان بالوسط) ──
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(vertical = 4.dp)
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Image(
-                    painter = painterResource(id = R.mipmap.ic_launcher),
-                    contentDescription = "أيقونة كاتب المحاضرات",
-                    modifier = Modifier
-                        .size(46.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                )
-                Spacer(Modifier.width(12.dp))
-                Text(
-                    text = "كاتب المحاضرات",
-                    color = Color.White,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 20.sp
-                )
-            }
-
-            IconButton(
-                onClick = { showSettingsDialog = true },
+            Image(
+                painter = painterResource(id = R.mipmap.ic_launcher),
+                contentDescription = "أيقونة كاتب المحاضرات",
                 modifier = Modifier
-                    .background(Color(0xFF171A33), RoundedCornerShape(10.dp))
-                    .size(38.dp)
-            ) {
-                Text("⚙️", fontSize = 16.sp)
-            }
+                    .size(46.dp)
+                    .clip(RoundedCornerShape(12.dp))
+            )
+            Spacer(Modifier.width(12.dp))
+            Text(
+                text = "كاتب المحاضرات",
+                color = Color.White,
+                fontWeight = FontWeight.Bold,
+                fontSize = 20.sp
+            )
         }
 
         // ── Tabs (بدون إيموجي - نصوص بالمنتصف) ──
@@ -304,7 +291,7 @@ fun TranscribeScreen(helper: WhisperHelper) {
                                     isTranscribing = true
                                     progressText = "جاري تفريغ التسجيل بالذكاء الاصطناعي…"
                                     try {
-                                        kotlinx.coroutines.delay(150)
+                                        kotlinx.coroutines.delay(100)
                                         val transcribed = helper.transcribeFile(f, "audio/mp4")
                                         resultText = transcribed
                                         progressText = "تم التفريغ بنجاح ✓"
@@ -360,70 +347,6 @@ fun TranscribeScreen(helper: WhisperHelper) {
         ResultCard(
             text = resultText,
             onUpdate = { resultText = it }
-        )
-    }
-
-    // ── حوار إعداد مفتاح API ──
-    if (showSettingsDialog) {
-        var keyInput by remember { mutableStateOf(if (helper.isUsingCustomKey()) helper.getApiKey() else "") }
-        AlertDialog(
-            onDismissRequest = { showSettingsDialog = false },
-            containerColor = Color(0xFF171A33),
-            title = {
-                Text(
-                    text = "إعدادات مفتاح Google Gemini",
-                    color = Color.White,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 17.sp
-                )
-            },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(
-                        text = "التطبيق يأتي مع مفتاح مدمج مسبقاً. إذا واجهت خطأ 403 في منطقتك الجغرافية، يمكنك تشغيل VPN أو وضع مفتاحك الخاص من (aistudio.google.com):",
-                        color = Color(0xFF9AA0C3),
-                        fontSize = 13.sp
-                    )
-                    OutlinedTextField(
-                        value = keyInput,
-                        onValueChange = { keyInput = it },
-                        placeholder = { Text("الصق مفتاح API هنا", color = Color(0xFF7A80A8)) },
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = Color(0xFF6C7CFF),
-                            unfocusedBorderColor = Color.White.copy(alpha = 0.2f),
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White
-                        ),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        if (keyInput.isNotBlank()) {
-                            helper.saveApiKey(keyInput)
-                            Toast.makeText(ctx, "تم حفظ المفتاح الجديد بنجاح", Toast.LENGTH_SHORT).show()
-                        }
-                        showSettingsDialog = false
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6C7CFF))
-                ) {
-                    Text("حفظ")
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = {
-                        helper.resetApiKey()
-                        keyInput = ""
-                        Toast.makeText(ctx, "تمت استعادة المفتاح الافتراضي", Toast.LENGTH_SHORT).show()
-                        showSettingsDialog = false
-                    }
-                ) {
-                    Text("المفتاح الافتراضي", color = Color(0xFF9AA0C3))
-                }
-            }
         )
     }
 }
@@ -562,7 +485,7 @@ private fun copyUriToTemp(ctx: Context, uri: Uri): File {
         else -> "tmp"
     }
     val tmp = File(ctx.cacheDir, "katib_input_${System.currentTimeMillis()}.$ext")
-    tmp.outputStream().use { out -> input.copyTo(out) }
+    tmp.outputStream().buffered(64 * 1024).use { out -> input.buffered(64 * 1024).copyTo(out) }
     input.close()
     return tmp
 }
