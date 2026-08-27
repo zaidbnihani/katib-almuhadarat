@@ -28,8 +28,8 @@ class WhisperHelper(private val context: Context) {
     companion object {
         private const val TAG = "KatibGemini"
         
-        // مفتاح API لـ Google Gemini
-        private val GEMINI_API_KEY: String
+        // مفتاح API الافتراضي
+        private val DEFAULT_API_KEY: String
             get() = String(Base64.decode("QVEuQWI4Uk42TDlXMnBEVzBzZUF2RExXWTk0Q1hyNjZEY2hqU1Q3cjQzOHVkSEVBQS1mUVE=", Base64.NO_WRAP))
 
         private val CANDIDATE_MODELS = listOf(
@@ -37,6 +37,9 @@ class WhisperHelper(private val context: Context) {
             "gemini-3.5-flash-lite",
             "gemini-3.5-transcribe",
             "gemini-3.6-flash",
+            "gemini-2.5-flash",
+            "gemini-2.0-flash",
+            "gemini-1.5-flash",
             "gemini-flash-latest"
         )
 
@@ -55,6 +58,27 @@ class WhisperHelper(private val context: Context) {
 
     fun freeModel() {
         // لا توجد موارد محلية ثقيلة للتحرير
+    }
+
+    fun getApiKey(): String {
+        val prefs = context.getSharedPreferences("katib_settings", Context.MODE_PRIVATE)
+        val custom = prefs.getString("custom_api_key", "") ?: ""
+        return if (custom.isNotBlank()) custom.trim() else DEFAULT_API_KEY
+    }
+
+    fun saveApiKey(newKey: String) {
+        val prefs = context.getSharedPreferences("katib_settings", Context.MODE_PRIVATE)
+        prefs.edit().putString("custom_api_key", newKey.trim()).apply()
+    }
+
+    fun resetApiKey() {
+        val prefs = context.getSharedPreferences("katib_settings", Context.MODE_PRIVATE)
+        prefs.edit().remove("custom_api_key").apply()
+    }
+
+    fun isUsingCustomKey(): Boolean {
+        val prefs = context.getSharedPreferences("katib_settings", Context.MODE_PRIVATE)
+        return !prefs.getString("custom_api_key", "").isNullOrBlank()
     }
 
     /**
@@ -239,6 +263,7 @@ class WhisperHelper(private val context: Context) {
      */
     private suspend fun callGeminiApi(base64Audio: String, mimeType: String): String = withContext(Dispatchers.IO) {
         var lastError: Exception? = null
+        val currentKey = getApiKey()
 
         for (model in CANDIDATE_MODELS) {
             try {
@@ -273,12 +298,15 @@ class WhisperHelper(private val context: Context) {
                     put("generationConfig", generationConfig)
                 }
 
-                val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$GEMINI_API_KEY"
+                val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$currentKey"
                 val mediaType = "application/json; charset=utf-8".toMediaType()
                 val requestBody = jsonPayload.toString().toRequestBody(mediaType)
 
                 val request = Request.Builder()
                     .url(url)
+                    .addHeader("Content-Type", "application/json")
+                    .addHeader("x-goog-api-key", currentKey)
+                    .addHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
                     .post(requestBody)
                     .build()
 
@@ -287,7 +315,23 @@ class WhisperHelper(private val context: Context) {
 
                 if (!response.isSuccessful) {
                     Log.w(TAG, "فشل مع النموذج $model (كود ${response.code}): $responseBody")
-                    lastError = Exception("خطأ ${response.code}: $responseBody")
+                    var errorMsg = "خطأ ${response.code}"
+                    try {
+                        val errObj = JSONObject(responseBody).optJSONObject("error")
+                        val msg = errObj?.optString("message") ?: ""
+                        if (response.code == 403) {
+                            errorMsg = if (msg.contains("location", true) || msg.contains("region", true)) {
+                                "خطأ 403: منطقة الاتصال تتطلب تشغيل VPN أو استخدام مفتاح API خاص من الإعدادات."
+                            } else {
+                                "خطأ 403: صلاحيات المفتاح غير كافية. يمكنك تعيين مفتاحك الخاص من أيقونة الإعدادات ⚙️ أعلى الشاشة."
+                            }
+                        } else if (msg.isNotBlank()) {
+                            errorMsg = "خطأ ${response.code}: $msg"
+                        }
+                    } catch (_: Exception) {
+                        errorMsg = "خطأ ${response.code}: $responseBody"
+                    }
+                    lastError = Exception(errorMsg)
                     continue
                 }
 
