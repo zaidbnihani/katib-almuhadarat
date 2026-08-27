@@ -1,10 +1,7 @@
 package com.katib.muhadarat.ui
 
 import android.Manifest
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Context
-import android.content.Intent
 import android.media.MediaRecorder
 import android.net.Uri
 import android.widget.Toast
@@ -58,6 +55,9 @@ fun TranscribeScreen(helper: WhisperHelper) {
     var recFile by remember { mutableStateOf<File?>(null) }
     var recorder: MediaRecorder? by remember { mutableStateOf(null) }
 
+    // حوار الإعدادات لمفتاح API
+    var showSettingsDialog by remember { mutableStateOf(false) }
+
     val pickFileLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         if (uri == null) return@rememberLauncherForActivityResult
         pickedName = uri.lastPathSegment ?: "ملف محدد"
@@ -93,27 +93,39 @@ fun TranscribeScreen(helper: WhisperHelper) {
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // ── Header (أيقونة التطبيق + العنوان بالوسط) ──
+        // ── Header (أيقونة التطبيق + العنوان + زر الإعدادات) ──
         Row(
             verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(vertical = 4.dp)
         ) {
-            Image(
-                painter = painterResource(id = R.mipmap.ic_launcher),
-                contentDescription = "أيقونة كاتب المحاضرات",
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Image(
+                    painter = painterResource(id = R.mipmap.ic_launcher),
+                    contentDescription = "أيقونة كاتب المحاضرات",
+                    modifier = Modifier
+                        .size(46.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                )
+                Spacer(Modifier.width(12.dp))
+                Text(
+                    text = "كاتب المحاضرات",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 20.sp
+                )
+            }
+
+            IconButton(
+                onClick = { showSettingsDialog = true },
                 modifier = Modifier
-                    .size(46.dp)
-                    .clip(RoundedCornerShape(12.dp))
-            )
-            Spacer(Modifier.width(12.dp))
-            Text(
-                text = "كاتب المحاضرات",
-                color = Color.White,
-                fontWeight = FontWeight.Bold,
-                fontSize = 20.sp
-            )
+                    .background(Color(0xFF171A33), RoundedCornerShape(10.dp))
+                    .size(40.dp)
+            ) {
+                Text("⚙️", fontSize = 18.sp)
+            }
         }
 
         // ── Tabs (بدون إيموجي - نصوص بالمنتصف) ──
@@ -348,6 +360,73 @@ fun TranscribeScreen(helper: WhisperHelper) {
         ResultCard(
             text = resultText,
             onUpdate = { resultText = it }
+        )
+    }
+
+    // ── حوار إعداد مفتاح API ──
+    if (showSettingsDialog) {
+        var keyInput by remember { mutableStateOf(if (helper.isUsingCustomKey()) helper.getApiKey() else "") }
+        AlertDialog(
+            onDismissRequest = { showSettingsDialog = false },
+            containerColor = Color(0xFF171A33),
+            title = {
+                Text(
+                    text = "إعدادات مفتاح Google Gemini ⚙️",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 17.sp
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "يمكنك وضع مفتاحك الخاص من (aistudio.google.com) أو ترك الحقل فارغاً لاستخدام المفتاح الافتراضي المدمج:",
+                        color = Color(0xFF9AA0C3),
+                        fontSize = 13.sp
+                    )
+                    OutlinedTextField(
+                        value = keyInput,
+                        onValueChange = { keyInput = it },
+                        placeholder = { Text("الصق مفتاح API الخاص بك هنا", color = Color(0xFF7A80A8)) },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Color(0xFF6C7CFF),
+                            unfocusedBorderColor = Color.White.copy(alpha = 0.2f),
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (keyInput.isNotBlank()) {
+                            helper.saveApiKey(keyInput)
+                            Toast.makeText(ctx, "تم حفظ مفتاح API الجديد بنجاح", Toast.LENGTH_SHORT).show()
+                        } else {
+                            helper.resetApiKey()
+                            Toast.makeText(ctx, "تم تعيين المفتاح الافتراضي", Toast.LENGTH_SHORT).show()
+                        }
+                        showSettingsDialog = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6C7CFF))
+                ) {
+                    Text("حفظ المفتاح")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        helper.resetApiKey()
+                        keyInput = ""
+                        Toast.makeText(ctx, "تمت استعادة المفتاح الافتراضي المدمج", Toast.LENGTH_SHORT).show()
+                        showSettingsDialog = false
+                    }
+                ) {
+                    Text("استعادة الافتراضي", color = Color(0xFF9AA0C3))
+                }
+            }
         )
     }
 }

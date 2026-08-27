@@ -29,8 +29,8 @@ class WhisperHelper(private val context: Context) {
     companion object {
         private const val TAG = "KatibEngine"
 
-        // مفتاح Google Gemini الافتراضي المدمج دائماً
-        private val API_KEY: String
+        // مفتاح Google Gemini الافتراضي
+        private val DEFAULT_API_KEY: String
             get() = String(
                 Base64.decode(
                     "QVEuQWI4Uk42TDlXMnBEVzBzZUF2RExXWTk0Q1hyNjZEY2hqU1Q3cjQzOHVkSEVBQS1mUVE=",
@@ -62,6 +62,27 @@ class WhisperHelper(private val context: Context) {
     fun isModelReady(): Boolean = true
 
     fun freeModel() {}
+
+    fun getApiKey(): String {
+        val prefs = context.getSharedPreferences("katib_settings", Context.MODE_PRIVATE)
+        val custom = prefs.getString("custom_gemini_api_key", "") ?: ""
+        return if (custom.isNotBlank()) custom.trim() else DEFAULT_API_KEY
+    }
+
+    fun saveApiKey(key: String) {
+        val prefs = context.getSharedPreferences("katib_settings", Context.MODE_PRIVATE)
+        prefs.edit().putString("custom_gemini_api_key", key.trim()).apply()
+    }
+
+    fun resetApiKey() {
+        val prefs = context.getSharedPreferences("katib_settings", Context.MODE_PRIVATE)
+        prefs.edit().remove("custom_gemini_api_key").apply()
+    }
+
+    fun isUsingCustomKey(): Boolean {
+        val prefs = context.getSharedPreferences("katib_settings", Context.MODE_PRIVATE)
+        return !prefs.getString("custom_gemini_api_key", "").isNullOrBlank()
+    }
 
     /**
      * معالجة وتفريغ أي ملف فيديو أو صوت فائق السرعة والخفة
@@ -169,10 +190,11 @@ class WhisperHelper(private val context: Context) {
     }
 
     /**
-     * استدعاء Google Gemini AI مع دعم جميع النماذج وتفادي أخطاء 403
+     * استدعاء Google Gemini AI مع دعم المفتاح المخصص وجميع النماذج
      */
     private suspend fun callGemini(base64Data: String, mimeType: String): String = withContext(Dispatchers.IO) {
         var lastError: Exception? = null
+        val currentKey = getApiKey()
 
         for (model in MODELS) {
             try {
@@ -206,13 +228,13 @@ class WhisperHelper(private val context: Context) {
                     put("generationConfig", genConfig)
                 }
 
-                val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$API_KEY"
+                val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$currentKey"
                 val body = payload.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
 
                 val request = Request.Builder()
                     .url(url)
                     .addHeader("Content-Type", "application/json")
-                    .addHeader("x-goog-api-key", API_KEY)
+                    .addHeader("x-goog-api-key", currentKey)
                     .addHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
                     .post(body)
                     .build()
@@ -226,7 +248,15 @@ class WhisperHelper(private val context: Context) {
                     try {
                         val json = JSONObject(responseBody).optJSONObject("error")
                         val serverMsg = json?.optString("message") ?: ""
-                        if (serverMsg.isNotBlank()) msg = "خطأ ${response.code}: $serverMsg"
+                        if (response.code == 403) {
+                            msg = if (serverMsg.contains("location", true) || serverMsg.contains("region", true)) {
+                                "خطأ 403: منطقتك تتطلب تشغيل VPN أو تعيين مفتاح API خاص من الإعدادات ⚙️"
+                            } else {
+                                "خطأ 403: صلاحيات المفتاح غير صالحة. اضغط ⚙️ بالأعلى لتغيير المفتاح."
+                            }
+                        } else if (serverMsg.isNotBlank()) {
+                            msg = "خطأ ${response.code}: $serverMsg"
+                        }
                     } catch (_: Exception) {}
                     lastError = Exception(msg)
                     continue
