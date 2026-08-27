@@ -289,6 +289,7 @@ fun TranscribeScreen(helper: WhisperHelper) {
                                     isTranscribing = true
                                     progressText = "جاري تفريغ التسجيل بالذكاء الاصطناعي…"
                                     try {
+                                        kotlinx.coroutines.delay(150)
                                         val transcribed = helper.transcribeFile(f, "audio/mp4")
                                         resultText = transcribed
                                         progressText = "تم التفريغ بنجاح ✓"
