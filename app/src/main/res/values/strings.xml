@@ -1,0 +1,13 @@
+<resources>
+    <string name="app_name">كاتب المحاضرات</string>
+    <string name="tab_video">استخراج من الفيديو</string>
+    <string name="tab_record">تسجيل مباشر</string>
+    <string name="pick_video">اختر فيديو / صوت</string>
+    <string name="start_rec">● بدء التسجيل</string>
+    <string name="stop_rec">■ إنهاء</string>
+    <string name="copy">نسخ</string>
+    <string name="save">حفظ</string>
+    <string name="clear">مسح</string>
+    <string name="model_not_found">النموذج غير موجود — سيتم تنزيله (~465MB)</string>
+    <string name="downloading">جاري التنزيل…</string>
+</resources>
