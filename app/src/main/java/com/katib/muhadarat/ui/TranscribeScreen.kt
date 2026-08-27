@@ -4,12 +4,14 @@ import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.media.MediaRecorder
 import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -19,13 +21,16 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.katib.muhadarat.R
 import com.katib.muhadarat.WhisperHelper
 import kotlinx.coroutines.launch
 import java.io.File
@@ -35,150 +40,391 @@ import kotlin.math.sin
 fun TranscribeScreen(helper: WhisperHelper) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
-    var tab by remember { mutableIntStateOf(0) } // 0 فيديو، 1 تسجيل
-    var modelReady by remember { mutableStateOf(helper.isModelReady()) }
-    var dlPct by remember { mutableIntStateOf(0) }
-    var dlText by remember { mutableStateOf("") }
-    var isDownloading by remember { mutableStateOf(false) }
+    var tab by remember { mutableIntStateOf(0) } // 0 من الفيديو، 1 تسجيل مباشر
 
-    // فيديو
+    // حالة الفيديو / الملف
     var pickedName by remember { mutableStateOf<String?>(null) }
-    var videoText by remember { mutableStateOf("") }
     var isTranscribing by remember { mutableStateOf(false) }
-    var progress by remember { mutableStateOf("") }
+    var progressText by remember { mutableStateOf("") }
 
-    // تسجيل
+    // النص العام المشترك للنتيجة
+    var resultText by remember { mutableStateOf("") }
+
+    // حالة التسجيل المباشر
     var isRecording by remember { mutableStateOf(false) }
-    var recText by remember { mutableStateOf("") }
     var recFile by remember { mutableStateOf<File?>(null) }
     var recorder: MediaRecorder? by remember { mutableStateOf(null) }
 
-    val pickVideo = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+    val pickFileLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         if (uri == null) return@rememberLauncherForActivityResult
-        pickedName = uri.lastPathSegment ?: "ملف"
+        pickedName = uri.lastPathSegment ?: "ملف محدد"
         scope.launch {
-            if (!helper.isModelReady()) { Toast.makeText(ctx,"حمّل النموذج أولاً",Toast.LENGTH_SHORT).show(); return@launch }
-            isTranscribing = true; progress = "استخراج الصوت…"
+            isTranscribing = true
+            progressText = "جاري رفع ومعالجة الملف بالذكاء الاصطناعي…"
             try {
-                val tmp = copyUriToTemp(ctx, uri)
-                progress = "تفريغ (قد يستغرق دقيقة)…"
-                if (!helper.initModel(helper.getModelFile().absolutePath)) throw IllegalStateException("فشل تحميل النموذج")
-                videoText = helper.transcribeFile(tmp)
-                progress = "اكتمل"
-            } catch (e: Exception) { progress = "خطأ: ${e.message}"; Toast.makeText(ctx, e.message, Toast.LENGTH_LONG).show() }
-            isTranscribing = false
+                val tmpFile = copyUriToTemp(ctx, uri)
+                val mimeType = ctx.contentResolver.getType(uri) ?: ""
+                val transcribed = helper.transcribeFile(tmpFile, mimeType)
+                resultText = transcribed
+                progressText = "تم التفريغ بنجاح ✓"
+            } catch (e: Exception) {
+                progressText = "حدث خطأ: ${e.localizedMessage ?: e.message}"
+                Toast.makeText(ctx, "فشل التفريغ: ${e.message}", Toast.LENGTH_LONG).show()
+            } finally {
+                isTranscribing = false
+            }
         }
     }
 
-    val permRec = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (!granted) Toast.makeText(ctx,"إذن الميكروفون مطلوب",Toast.LENGTH_SHORT).show()
+    val permRecordLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (!granted) {
+            Toast.makeText(ctx, "إذن الميكروفون مطلوب للتسجيل المباشر", Toast.LENGTH_SHORT).show()
+        }
     }
 
-    Column(modifier = Modifier.fillMaxSize().background(Color(0xFF0F1221)).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        // Header
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-            Box(modifier = Modifier.size(46.dp).background(Brush.linearGradient(listOf(Color(0xFF6C7CFF), Color(0xFF8B5CF6))), RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) { Text("ك", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 22.sp) }
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF0F1221))
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        // ── Header (أيقونة التطبيق + العنوان بالوسط) ──
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 4.dp)
+        ) {
+            Image(
+                painter = painterResource(id = R.mipmap.ic_launcher),
+                contentDescription = "أيقونة كاتب المحاضرات",
+                modifier = Modifier
+                    .size(46.dp)
+                    .clip(RoundedCornerShape(12.dp))
+            )
             Spacer(Modifier.width(12.dp))
-            Column { Text("كاتب المحاضرات", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp); Text("فيديو → نص  •  تسجيل → نص  •  يعمل بدون إنترنت", color = Color(0xFF9AA0C3), fontSize = 12.sp) }
+            Text(
+                text = "كاتب المحاضرات",
+                color = Color.White,
+                fontWeight = FontWeight.Bold,
+                fontSize = 20.sp
+            )
         }
 
-        // Model card
-        Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFF171A33)), modifier = Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(if (modelReady) "النموذج جاهز ✓" else "النموذج غير موجود — حوالي 465MB", color = if (modelReady) Color(0xFFBBF7D0) else Color(0xFFFDE68A), fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                if (!modelReady) {
-                    if (isDownloading) {
-                        LinearProgressIndicator(progress = { dlPct/100f }, modifier = Modifier.fillMaxWidth(), color = Color(0xFF6C7CFF), trackColor = Color.White.copy(alpha=0.1f))
-                        Text("$dlPct%  $dlText", color = Color(0xFF9AA0C3), fontSize = 11.sp)
-                    } else {
-                        Button(onClick = {
-                            isDownloading = true; scope.launch {
-                                try { helper.downloadModel { pct, done, total -> dlPct = pct; dlText = "${done/1024/1024}MB / ${total/1024/1024}MB" }; modelReady = true; Toast.makeText(ctx,"اكتمل التنزيل",Toast.LENGTH_SHORT).show() }
-                                catch(e:Exception){ Toast.makeText(ctx,"فشل: ${e.message}",Toast.LENGTH_LONG).show() }
-                                isDownloading = false
-                            }
-                        }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6C7CFF))) { Text("تنزيل النموذج") }
+        // ── Tabs (بدون إيموجي - نصوص بالمنتصف) ──
+        Card(
+            shape = RoundedCornerShape(14.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF171A33)),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(4.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly
+            ) {
+                val tabs = listOf("من الفيديو", "تسجيل مباشر")
+                tabs.forEachIndexed { i, title ->
+                    val isSelected = tab == i
+                    Button(
+                        onClick = { tab = i },
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(horizontal = 4.dp),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (isSelected) Color(0xFF6C7CFF) else Color.Transparent,
+                            contentColor = if (isSelected) Color.White else Color(0xFF9AA0C3)
+                        )
+                    ) {
+                        Text(
+                            text = title,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp,
+                            textAlign = TextAlign.Center
+                        )
                     }
                 }
             }
         }
 
-        // Tabs
-        TabRow(selectedTabIndex = tab, containerColor = Color.Transparent, contentColor = Color.White, indicator = {}, divider = {}) {
-            listOf("🎬  من الفيديو","🎙️  تسجيل مباشر").forEachIndexed { i, t ->
-                val sel = tab==i
-                FilterChip(selected = sel, onClick = { tab = i }, label = { Text(t, color = if(sel) Color.White else Color(0xFF9AA0C3), fontWeight = FontWeight.Bold) }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = Color(0xFF6C7CFF), containerColor = Color.White.copy(alpha=0.06f)), modifier = Modifier.padding(4.dp))
-            }
-        }
+        // ── محتوى التبويب ──
+        if (tab == 0) {
+            // قسم اختيار الملف / الفيديو
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF1D2142)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Button(
+                        onClick = { pickFileLauncher.launch("*/*") },
+                        enabled = !isTranscribing,
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6C7CFF)),
+                        modifier = Modifier
+                            .fillMaxWidth(0.85f)
+                            .height(50.dp)
+                    ) {
+                        Text(
+                            text = "اختيار ملف",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
 
-        if (tab==0) {
-            // فيديو
-            Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFF1D2142)), modifier = Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("اسحب أو اختر فيديو / صوت", color = Color.White, fontWeight = FontWeight.Bold)
-                    Text("MP4, MKV, MOV, MP3, WAV, M4A…", color = Color(0xFF9AA0C3), fontSize = 12.sp)
-                    Button(onClick = { pickVideo.launch("*/*") }, enabled = !isTranscribing, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6C7CFF))) { Text("اختر ملف") }
-                    pickedName?.let { Text(it, color = Color(0xFF9AA0C3), fontSize = 11.sp) }
-                    if (isTranscribing) { CircularProgressIndicator(color = Color(0xFF6C7CFF), modifier = Modifier.size(22.dp)); Text(progress, color = Color(0xFF9AA0C3), fontSize = 12.sp) }
-                    if (progress.isNotEmpty() && !isTranscribing) Text(progress, color = Color(0xFF9AA0C3), fontSize = 12.sp)
+                    pickedName?.let {
+                        Text(
+                            text = it,
+                            color = Color(0xFF9AA0C3),
+                            fontSize = 13.sp,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+
+                    if (isTranscribing) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            CircularProgressIndicator(
+                                color = Color(0xFF6C7CFF),
+                                modifier = Modifier.size(20.dp),
+                                strokeWidth = 2.5.dp
+                            )
+                            Text(
+                                text = progressText,
+                                color = Color(0xFFC7D2FE),
+                                fontSize = 13.sp
+                            )
+                        }
+                    } else if (progressText.isNotEmpty()) {
+                        Text(
+                            text = progressText,
+                            color = Color(0xFF9AA0C3),
+                            fontSize = 12.sp
+                        )
+                    }
                 }
             }
-            ResultCard(text = videoText, onUpdate = { videoText = it })
         } else {
-            // تسجيل
-            Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFF1D2142)), modifier = Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("سجّل صوتك الآن", color = Color.White, fontWeight = FontWeight.Bold)
-                    Text("تحدث بوضوح ثم اضغط إنهاء ليُحوّل فورًا", color = Color(0xFF9AA0C3), fontSize = 12.sp)
-                    // موجة بسيطة متحركة
+            // قسم التسجيل المباشر
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF1D2142)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    // موجة صوتية بسيطة
                     WaveCanvas(isRecording)
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Button(onClick = {
-                            permRec.launch(Manifest.permission.RECORD_AUDIO)
-                            if (!helper.isModelReady()) { Toast.makeText(ctx,"حمّل النموذج أولاً",Toast.LENGTH_SHORT).show(); return@Button }
-                            try {
-                                val f = File(ctx.cacheDir, "rec_${System.currentTimeMillis()}.m4a")
-                                val r = if (android.os.Build.VERSION.SDK_INT >= 31) MediaRecorder(ctx) else MediaRecorder()
-                                r.setAudioSource(MediaRecorder.AudioSource.MIC); r.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-                                r.setAudioEncoder(MediaRecorder.AudioEncoder.AAC); r.setAudioSamplingRate(16000); r.setAudioEncodingBitRate(32000)
-                                r.setOutputFile(f.absolutePath); r.prepare(); r.start()
-                                recorder = r; recFile = f; isRecording = true
-                            } catch(e:Exception){ Toast.makeText(ctx,"فشل التسجيل: ${e.message}",Toast.LENGTH_LONG).show() }
-                        }, enabled = !isRecording, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6C7CFF))) { Text("● بدء") }
-                        Button(onClick = {
-                            try { recorder?.stop(); recorder?.release() } catch(_:Exception){}
-                            recorder = null; isRecording = false
-                            val f = recFile ?: return@Button
-                            scope.launch {
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Button(
+                            onClick = {
+                                permRecordLauncher.launch(Manifest.permission.RECORD_AUDIO)
                                 try {
-                                    if (!helper.initModel(helper.getModelFile().absolutePath)) throw IllegalStateException("النموذج غير جاهز")
-                                    recText = "جاري التفريغ…"
-                                    recText = helper.transcribeFile(f)
-                                } catch(e:Exception){ recText = "خطأ: ${e.message}" }
-                            }
-                        }, enabled = isRecording, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444))) { Text("■ إنهاء") }
-                        Text(if(isRecording) "يسجّل…" else "جاهز", color = if(isRecording) Color(0xFFF87171) else Color(0xFF9AA0C3), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    val f = File(ctx.cacheDir, "rec_${System.currentTimeMillis()}.m4a")
+                                    val r = if (android.os.Build.VERSION.SDK_INT >= 31) MediaRecorder(ctx) else MediaRecorder()
+                                    r.setAudioSource(MediaRecorder.AudioSource.MIC)
+                                    r.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+                                    r.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+                                    r.setAudioSamplingRate(16000)
+                                    r.setAudioEncodingBitRate(32000)
+                                    r.setOutputFile(f.absolutePath)
+                                    r.prepare()
+                                    r.start()
+                                    recorder = r
+                                    recFile = f
+                                    isRecording = true
+                                } catch (e: Exception) {
+                                    Toast.makeText(ctx, "فشل بدء التسجيل: ${e.message}", Toast.LENGTH_LONG).show()
+                                }
+                            },
+                            enabled = !isRecording && !isTranscribing,
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(46.dp)
+                        ) {
+                            Text("بدء التسجيل", fontWeight = FontWeight.Bold)
+                        }
+
+                        Button(
+                            onClick = {
+                                try {
+                                    recorder?.stop()
+                                    recorder?.release()
+                                } catch (_: Exception) {}
+                                recorder = null
+                                isRecording = false
+
+                                val f = recFile ?: return@Button
+                                scope.launch {
+                                    isTranscribing = true
+                                    progressText = "جاري تفريغ التسجيل بالذكاء الاصطناعي…"
+                                    try {
+                                        val transcribed = helper.transcribeFile(f, "audio/mp4")
+                                        resultText = transcribed
+                                        progressText = "تم التفريغ بنجاح ✓"
+                                    } catch (e: Exception) {
+                                        progressText = "خطأ: ${e.message}"
+                                        Toast.makeText(ctx, "فشل: ${e.message}", Toast.LENGTH_LONG).show()
+                                    } finally {
+                                        isTranscribing = false
+                                    }
+                                }
+                            },
+                            enabled = isRecording,
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444)),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(46.dp)
+                        ) {
+                            Text("إنهاء وتفريغ", fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    if (isTranscribing) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            CircularProgressIndicator(
+                                color = Color(0xFF6C7CFF),
+                                modifier = Modifier.size(18.dp),
+                                strokeWidth = 2.dp
+                            )
+                            Text(
+                                text = progressText,
+                                color = Color(0xFFC7D2FE),
+                                fontSize = 13.sp
+                            )
+                        }
                     }
                 }
             }
-            ResultCard(text = recText, onUpdate = { recText = it })
         }
+
+        // ── بطاقة النتيجة مع أزرار (نسخ / مشاركة / حذف) ──
+        ResultCard(
+            text = resultText,
+            onUpdate = { resultText = it },
+            onClear = { resultText = "" }
+        )
     }
 }
 
 @Composable
-private fun ResultCard(text: String, onUpdate: (String)->Unit) {
+private fun ResultCard(
+    text: String,
+    onUpdate: (String) -> Unit,
+    onClear: () -> Unit
+) {
     val ctx = LocalContext.current
-    Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFF171A33)), modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text("النص", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF171A33)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "النص المستخرج",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp
+                )
+
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    OutlinedButton(onClick = { val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager; cm.setPrimaryClip(ClipData.newPlainText("katib", text)); Toast.makeText(ctx,"تم النسخ",Toast.LENGTH_SHORT).show() }, enabled = text.isNotEmpty()) { Text("نسخ", fontSize = 12.sp) }
-                    OutlinedButton(onClick = { onUpdate("") }) { Text("مسح", fontSize = 12.sp) }
+                    // زر نسخ
+                    OutlinedButton(
+                        onClick = {
+                            val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                            cm.setPrimaryClip(ClipData.newPlainText("katib", text))
+                            Toast.makeText(ctx, "تم نسخ النص", Toast.LENGTH_SHORT).show()
+                        },
+                        enabled = text.isNotEmpty(),
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                    ) {
+                        Text("نسخ", fontSize = 12.sp)
+                    }
+
+                    // زر مشاركة
+                    OutlinedButton(
+                        onClick = {
+                            val sendIntent = Intent().apply {
+                                action = Intent.ACTION_SEND
+                                putExtra(Intent.EXTRA_TEXT, text)
+                                type = "text/plain"
+                            }
+                            ctx.startActivity(Intent.createChooser(sendIntent, "مشاركة النص"))
+                        },
+                        enabled = text.isNotEmpty(),
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                    ) {
+                        Text("مشاركة", fontSize = 12.sp)
+                    }
+
+                    // زر حذف / مسح
+                    OutlinedButton(
+                        onClick = onClear,
+                        enabled = text.isNotEmpty(),
+                        shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFF87171)),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                    ) {
+                        Text("حذف", fontSize = 12.sp)
+                    }
                 }
             }
-            OutlinedTextField(value = text, onValueChange = onUpdate, placeholder = { Text("النص سيظهر هنا…", color = Color(0xFF7A80A8)) }, modifier = Modifier.fillMaxWidth().heightIn(min=140.dp), colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFF6C7CFF), unfocusedBorderColor = Color.White.copy(alpha=0.1f), focusedTextColor = Color.White, unfocusedTextColor = Color.White, cursorColor = Color(0xFF6C7CFF)), shape = RoundedCornerShape(12.dp))
+
+            OutlinedTextField(
+                value = text,
+                onValueChange = onUpdate,
+                placeholder = {
+                    Text("النص سيظهر هنا بعد التفريغ…", color = Color(0xFF7A80A8))
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 160.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = Color(0xFF6C7CFF),
+                    unfocusedBorderColor = Color.White.copy(alpha = 0.1f),
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White,
+                    cursorColor = Color(0xFF6C7CFF)
+                ),
+                shape = RoundedCornerShape(12.dp)
+            )
         }
     }
 }
@@ -186,22 +432,58 @@ private fun ResultCard(text: String, onUpdate: (String)->Unit) {
 @Composable
 private fun WaveCanvas(active: Boolean) {
     var tick by remember { mutableIntStateOf(0) }
-    LaunchedEffect(active) { while(active){ tick++; kotlinx.coroutines.delay(80) } }
-    Canvas(modifier = Modifier.fillMaxWidth().height(80.dp).background(Color.Black.copy(alpha=0.25f), RoundedCornerShape(12.dp))) {
-        val w = size.width; val h = size.height
-        if (!active) { drawLine(Color.White.copy(alpha=0.08f), Offset(0f,h/2), Offset(w,h/2), strokeWidth = 1.5f); return@Canvas }
-        val amp = 22f
+    LaunchedEffect(active) {
+        while (active) {
+            tick++
+            kotlinx.coroutines.delay(80)
+        }
+    }
+    Canvas(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(70.dp)
+            .background(Color.Black.copy(alpha = 0.25f), RoundedCornerShape(12.dp))
+    ) {
+        val w = size.width
+        val h = size.height
+        if (!active) {
+            drawLine(
+                Color.White.copy(alpha = 0.08f),
+                Offset(0f, h / 2),
+                Offset(w, h / 2),
+                strokeWidth = 1.5f
+            )
+            return@Canvas
+        }
+        val amp = 20f
         for (x in 0 until w.toInt() step 3) {
-            val y = h/2 + sin((x*0.08f + tick*0.6f).toDouble()).toFloat()*amp + sin((x*0.04f - tick*0.3f).toDouble()).toFloat()*amp*0.4f
-            drawLine(Color(0xFF8EA0FF), Offset(x.toFloat(), h/2), Offset(x.toFloat(), y), strokeWidth = 2.2f)
+            val y = h / 2 +
+                    sin((x * 0.08f + tick * 0.6f).toDouble()).toFloat() * amp +
+                    sin((x * 0.04f - tick * 0.3f).toDouble()).toFloat() * amp * 0.4f
+            drawLine(
+                Color(0xFF8EA0FF),
+                Offset(x.toFloat(), h / 2),
+                Offset(x.toFloat(), y),
+                strokeWidth = 2.2f
+            )
         }
     }
 }
 
 private fun copyUriToTemp(ctx: Context, uri: Uri): File {
-    val input = ctx.contentResolver.openInputStream(uri) ?: throw IllegalArgumentException("تعذر فتح الملف")
-    val ext = ctx.contentResolver.getType(uri)?.substringAfter('/') ?: "mp4"
-    val tmp = File(ctx.cacheDir, "pick_${System.currentTimeMillis()}.$ext")
+    val input = ctx.contentResolver.openInputStream(uri)
+        ?: throw IllegalArgumentException("تعذر فتح الملف")
+    val mime = ctx.contentResolver.getType(uri) ?: ""
+    val ext = when {
+        mime.contains("mp4") -> "mp4"
+        mime.contains("mp3") -> "mp3"
+        mime.contains("wav") -> "wav"
+        mime.contains("m4a") -> "m4a"
+        mime.contains("quicktime") || mime.contains("mov") -> "mov"
+        mime.contains("matroska") || mime.contains("mkv") -> "mkv"
+        else -> "tmp"
+    }
+    val tmp = File(ctx.cacheDir, "katib_input_${System.currentTimeMillis()}.$ext")
     tmp.outputStream().use { out -> input.copyTo(out) }
     input.close()
     return tmp

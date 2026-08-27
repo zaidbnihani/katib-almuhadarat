@@ -11,8 +11,8 @@ android {
         applicationId = "com.katib.muhadarat"
         minSdk = 24
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64") }
@@ -48,6 +48,7 @@ dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.6")
     implementation("androidx.navigation:navigation-compose:2.8.4")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
     // Media3 لاستخراج الصوت من الفيديو
     implementation("androidx.media3:media3-extractor:1.4.1")
     implementation("androidx.media3:media3-transformer:1.4.1")
