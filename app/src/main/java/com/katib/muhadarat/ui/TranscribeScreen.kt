@@ -30,6 +30,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.katib.muhadarat.PdfExporter
 import com.katib.muhadarat.R
 import com.katib.muhadarat.WhisperHelper
 import kotlinx.coroutines.Dispatchers
@@ -379,20 +380,10 @@ private fun ResultCard(
                     fontSize = 15.sp
                 )
 
-                // زر حفظ فقط
+                // زر حفظ كملف PDF
                 Button(
                     onClick = {
-                        val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                        cm.setPrimaryClip(ClipData.newPlainText("katib", text))
-                        Toast.makeText(ctx, "تم نسخ النص للحافظة", Toast.LENGTH_SHORT).show()
-                        try {
-                            val sendIntent = Intent().apply {
-                                action = Intent.ACTION_SEND
-                                putExtra(Intent.EXTRA_TEXT, text)
-                                type = "text/plain"
-                            }
-                            ctx.startActivity(Intent.createChooser(sendIntent, "حفظ ومشاركة النص"))
-                        } catch (_: Exception) {}
+                        PdfExporter.exportAndSharePdf(ctx, text)
                     },
                     enabled = text.isNotEmpty(),
                     shape = RoundedCornerShape(8.dp),
